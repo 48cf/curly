@@ -25,5 +25,6 @@ pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
 
     addExecutable(b, target, "assembler");
+    addExecutable(b, target, "disassembler");
     addExecutable(b, target, "emulator");
 }

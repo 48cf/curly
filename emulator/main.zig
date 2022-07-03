@@ -147,52 +147,21 @@ pub fn main() !void {
 
     machine.cpu.store(.pc, machine.memory.dram_base);
 
-    const std_r0_10000 = isa.Instruction{ .l = .{ .code = .@"st.d", .reg = .r0, .imm = 0x10000 } };
-    const add_r0_zero_H = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = 'H' } };
-    const add_r0_zero_e = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = 'e' } };
-    const add_r0_zero_l = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = 'l' } };
-    const add_r0_zero_o = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = 'o' } };
-    const add_r0_zero_comma = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = ',' } };
-    const add_r0_zero_space = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = ' ' } };
-    const add_r0_zero_w = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = 'w' } };
-    const add_r0_zero_r = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = 'r' } };
-    const add_r0_zero_d = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = 'd' } };
-    const add_r0_zero_excl = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = '!' } };
-    const add_r0_zero_nl = isa.Instruction{ .m = .{ .code = .@"add", .reg1 = .r0, .reg2 = .zero, .imm = '\n' } };
-    const jz_zero_minus1 = isa.Instruction{ .l = .{ .code = .@"jz", .reg = .zero, .imm = -1 } };
-    const instrs = &[_]isa.Instruction{
-        add_r0_zero_H,
-        std_r0_10000,
-        add_r0_zero_e,
-        std_r0_10000,
-        add_r0_zero_l,
-        std_r0_10000,
-        std_r0_10000,
-        add_r0_zero_o,
-        std_r0_10000,
-        add_r0_zero_comma,
-        std_r0_10000,
-        add_r0_zero_space,
-        std_r0_10000,
-        add_r0_zero_w,
-        std_r0_10000,
-        add_r0_zero_o,
-        std_r0_10000,
-        add_r0_zero_r,
-        std_r0_10000,
-        add_r0_zero_l,
-        std_r0_10000,
-        add_r0_zero_d,
-        std_r0_10000,
-        add_r0_zero_excl,
-        std_r0_10000,
-        add_r0_zero_nl,
-        std_r0_10000,
-        jz_zero_minus1,
-    };
+    var args = try std.process.argsWithAllocator(std.heap.page_allocator);
+    _ = args.next();
 
-    for (instrs) |instr, i| {
-        machine.memory.store(u32, machine.memory.dram_base + i * 0x4, instr.encode());
+    const binary_path = args.next() orelse @panic("Expected binary path as first argument");
+
+    const binary_file = try std.fs.cwd().openFile(binary_path, .{});
+
+    _ = try binary_file.readAll(machine.memory.dram.items);
+
+    var last_pc = machine.cpu.load(.pc);
+    while(true) {
         machine.step();
+        const curr_pc = machine.cpu.load(.pc);
+        if(last_pc == curr_pc)
+            break;
+        last_pc = curr_pc;
     }
 }
