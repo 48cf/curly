@@ -24,8 +24,8 @@ const Token = struct {
 };
 
 fn charsToEnum(comptime E: type, chars: []const u8) ?E {
-    inline for(@typeInfo(E).Enum.fields) |field| {
-        if(std.mem.eql(u8, chars, field.name)) {
+    inline for (@typeInfo(E).Enum.fields) |field| {
+        if (std.mem.eql(u8, chars, field.name)) {
             return @field(E, field.name);
         }
     }
@@ -83,24 +83,27 @@ const Mnemonic = enum {
 };
 
 fn hexValue(ch: u8) u4 {
-    if('a' <= ch and ch <= 'f')
+    if ('a' <= ch and ch <= 'f') {
         return @intCast(u4, (ch - 'a') + 10);
-    if('A' <= ch and ch <= 'F')
+    } else if ('A' <= ch and ch <= 'F') {
         return @intCast(u4, (ch - 'A') + 10);
-    if('0' <= ch and ch <= '9')
+    } else if ('0' <= ch and ch <= '9') {
         return @intCast(u4, ch - '0');
-    unreachable;
+    } else {
+        unreachable;
+    }
 }
 
 const Tokenizer = struct {
     source: []const u8,
     offset: usize,
-    next_token: ?Token = null,
+    next_token: ?Token,
 
     fn init(source: []const u8) @This() {
         return .{
             .source = source,
             .offset = 0,
+            .next_token = null,
         };
     }
 
@@ -109,19 +112,16 @@ const Tokenizer = struct {
     }
 
     fn expect(self: *@This(), kind: TokenKind) Token {
-        const n = self.next();
-        if(n.value != kind) {
-            std.debug.panic("Error: expected {s}, found {}!", .{
-                @tagName(kind),
-                n.value,
-            });
+        const token = self.next();
+        if (token.value != kind) {
+            std.debug.panic("Error: expected {s}, found {}!", .{ @tagName(kind), token.value });
         }
-        return n;
+        return token;
     }
 
     fn peek(self: *@This()) Token {
-        if(self.next_token) |t| {
-            return t;
+        if (self.next_token) |token| {
+            return token;
         }
 
         self.next_token = self.makeToken();
@@ -140,7 +140,7 @@ const Tokenizer = struct {
         }
 
         if (self.isEof()) {
-            return .{.value = .eof, .start = self.offset, .source_bytes = self.source[self.offset..self.offset] };
+            return .{ .value = .eof, .start = self.offset, .source_bytes = self.source[self.offset..self.offset] };
         }
 
         var start = self.offset;
@@ -167,27 +167,28 @@ const Tokenizer = struct {
                 self.offset += 1;
             }
 
-            if(charsToEnum(Mnemonic, self.source[start..self.offset])) |m| {
+            if (charsToEnum(Mnemonic, self.source[start..self.offset])) |m| {
                 return .{ .value = .{ .mnemonic = m }, .start = start, .source_bytes = self.source[start..self.offset] };
-            }
-            if(charsToEnum(isa.Register, self.source[start..self.offset])) |reg| {
+            } else if (charsToEnum(isa.Register, self.source[start..self.offset])) |reg| {
                 return .{ .value = .{ .register = reg }, .start = start, .source_bytes = self.source[start..self.offset] };
-            }
-            if(charsToEnum(isa.Msr, self.source[start..self.offset])) |msr| {
+            } else if (charsToEnum(isa.Msr, self.source[start..self.offset])) |msr| {
                 return .{ .value = .{ .msr = msr }, .start = start, .source_bytes = self.source[start..self.offset] };
             }
 
             return .{ .value = .ident, .start = start, .source_bytes = self.source[start..self.offset] };
         } else if (std.ascii.isDigit(ch) or ch == '-' or ch == '~') {
-            const value = blk: { switch(ch) {
-                '-' => break :blk @bitCast(u64, -@bitCast(i64, self.parseUnsigned())),
-                '~' => break :blk ~self.parseUnsigned(),
-                else => {
-                    self.offset -= 1;
-                    break :blk self.parseUnsigned();
-                },
-            } };
-            return .{ .value = .{.integer = value}, .start = start, .source_bytes = self.source[start..self.offset] };
+            const value = blk: {
+                switch (ch) {
+                    '-' => break :blk @bitCast(u64, -@bitCast(i64, self.parseUnsigned())),
+                    '~' => break :blk ~self.parseUnsigned(),
+                    else => {
+                        self.offset -= 1;
+                        break :blk self.parseUnsigned();
+                    },
+                }
+            };
+
+            return .{ .value = .{ .integer = value }, .start = start, .source_bytes = self.source[start..self.offset] };
         }
 
         std.debug.panic("Invalid input character: {c}", .{ch});
@@ -200,8 +201,7 @@ const Tokenizer = struct {
             if (std.ascii.isXDigit(next_ch)) {
                 result *= base;
                 result += hexValue(next_ch);
-            }
-            else {
+            } else {
                 return result;
             }
             self.offset += 1;
@@ -212,20 +212,17 @@ const Tokenizer = struct {
     fn parseUnsigned(self: *@This()) u64 {
         var ch = self.source[self.offset];
         if (ch == '0' and !self.isEof()) {
-            self.offset += 1;
-            const next_ch = self.source[self.offset];
-
-            switch(next_ch) {
+            switch (self.source[self.offset + 1]) {
                 'b' => {
-                    self.offset += 1;
+                    self.offset += 2;
                     return self.parseUnsignedBase(2);
                 },
                 'o' => {
-                    self.offset += 1;
+                    self.offset += 2;
                     return self.parseUnsignedBase(8);
                 },
                 'x' => {
-                    self.offset += 1;
+                    self.offset += 2;
                     return self.parseUnsignedBase(16);
                 },
                 else => {},
@@ -256,22 +253,26 @@ const Relocation = struct {
         const offset = value + self.value_offset -% (self.write_offset + 4);
         const old_value = std.mem.readIntLittle(u32, data[self.write_offset..][0..4]);
 
-        switch(self.kind) {
-            .abs64 => std.mem.writeIntLittle(u64, data[self.write_offset..][0..8], value + self.value_offset + base_address),
+        switch (self.kind) {
+            .abs64 => std.mem.writeIntLittle(
+                u64,
+                data[self.write_offset..][0..8],
+                value + self.value_offset + base_address,
+            ),
             .m_imm_pcrel => std.mem.writeIntLittle(
                 u32,
                 data[self.write_offset..][0..4],
-                (old_value & 0x0000FFFF) | @truncate(u32, offset << 16)
+                (old_value & 0x0000FFFF) | @truncate(u32, offset << 16),
             ),
             .m_imm_pcrel_div4 => std.mem.writeIntLittle(
                 u32,
                 data[self.write_offset..][0..4],
-                (old_value & 0x0000FFFF) | @truncate(u32, (offset >> 2) << 16)
+                (old_value & 0x0000FFFF) | @truncate(u32, (offset >> 2) << 16),
             ),
             .l_imm_pcrel_div4 => std.mem.writeIntLittle(
                 u32,
                 data[self.write_offset..][0..4],
-                (old_value & 0x000007FF) | @truncate(u32, (offset >> 2) << 11)
+                (old_value & 0x000007FF) | @truncate(u32, (offset >> 2) << 11),
             ),
         }
     }
@@ -295,12 +296,12 @@ const Writer = struct {
 
     fn addLabel(self: *@This(), label: Token) !void {
         var i: usize = 0;
-        while(i < self.relocations.items.len) {
-            if(std.mem.eql(u8, self.relocations.items[i].source_bytes, label.source_bytes)) {
+        while (i < self.relocations.items.len) {
+            if (std.mem.eql(u8, self.relocations.items[i].source_bytes, label.source_bytes)) {
                 self.relocations.items[i].patch(self.output_data.items, self.output_data.items.len, self.base_address);
                 _ = self.relocations.swapRemove(i);
             } else {
-                i += 1;       
+                i += 1;
             }
         }
         try self.labels.put(label.source_bytes, self.output_data.items.len);
@@ -308,24 +309,23 @@ const Writer = struct {
 
     fn getLabelValue(self: *@This(), tok: Token) ?usize {
         var it = self.labels.iterator();
-        while(it.next()) |label| {
-            if(std.mem.eql(u8, label.key_ptr.*, tok.source_bytes)) {
+        while (it.next()) |label| {
+            if (std.mem.eql(u8, label.key_ptr.*, tok.source_bytes)) {
                 return label.value_ptr.*;
             }
         }
-
         return null;
     }
 
     fn maybeRelocLastInstr(self: *@This(), label: Token, kind: RelocationKind, offset: u64) !void {
-        const reloc = Relocation {
+        const reloc = Relocation{
             .write_offset = self.output_data.items.len - 4,
             .source_bytes = label.source_bytes,
             .kind = kind,
             .value_offset = offset,
         };
 
-        if(self.getLabelValue(label)) |value| {
+        if (self.getLabelValue(label)) |value| {
             reloc.patch(self.output_data.items, value, self.base_address);
         } else {
             try self.relocations.append(reloc);
@@ -341,7 +341,7 @@ const Writer = struct {
         rhs: isa.Register,
         imm: u6,
     ) !void {
-        try self.output_data.writer().writeIntLittle(u32, isa.Instruction.encode(.{.r = .{
+        try self.output_data.writer().writeIntLittle(u32, isa.Instruction.encode(.{ .r = .{
             .code = opcode,
             .size = size,
             .dest = dest,
@@ -369,7 +369,7 @@ const Writer = struct {
         reg2: isa.Register,
         imm: u16,
     ) !void {
-        try self.output_data.writer().writeIntLittle(u32, isa.Instruction.encode(.{.m = .{
+        try self.output_data.writer().writeIntLittle(u32, isa.Instruction.encode(.{ .m = .{
             .code = code,
             .reg1 = reg1,
             .reg2 = reg2,
@@ -383,7 +383,7 @@ const Writer = struct {
         reg: isa.Register,
         imm: i21,
     ) !void {
-        try self.output_data.writer().writeIntLittle(u32, isa.Instruction.encode(.{.l = .{
+        try self.output_data.writer().writeIntLittle(u32, isa.Instruction.encode(.{ .l = .{
             .code = code,
             .reg = reg,
             .imm = imm,
@@ -411,92 +411,62 @@ const Writer = struct {
 };
 
 fn handleSourceFile(input: []const u8, writer: *Writer) !void {
-    _ = writer;
-
     var tokenizer = Tokenizer.init(input);
 
     while (true) {
         const token = tokenizer.next();
         std.log.info("Token: {}", .{token});
-        switch(token.value) {
-        .eof => return,
+        switch (token.value) {
+            .eof => return,
+            .mnemonic => |m| switch (m) {
+                .@"jlr" => {
+                    const link = tokenizer.readRegister();
+                    _ = tokenizer.expect(.comma);
 
-        .mnemonic => |m| switch(m) {
-            .@"jlr" => {
-                const link = tokenizer.readRegister();
-                _ = tokenizer.expect(.comma);
+                    const target = tokenizer.next();
+                    switch (target.value) {
+                        .register => |dest| {
+                            try writer.r(
+                                .@"jlr",
+                                .qword,
+                                link,
+                                dest,
+                                .zero, // unused
+                                0, // unused
+                            );
+                        },
+                        .ident => {
+                            try writer.l_label_pcrel(
+                                .@"jlr",
+                                link,
+                                target,
+                            );
+                        },
+                        else => @panic("Expected register or label!"),
+                    }
+                },
+                .@"ld", .@"ld.b", .@"ld.w", .@"ld.d", .@"ld.q", .@"st", .@"st.b", .@"st.w", .@"st.d", .@"st.q" => {
+                    const value_reg = tokenizer.readRegister();
+                    _ = tokenizer.expect(.comma);
+                    _ = value_reg;
 
-                const target = tokenizer.next();
-                switch(target.value) {
-                    .register => |dest| {
-                        try writer.r(
-                            .@"jlr",
-                            .qword,
-                            link,
-                            dest,
-                            .zero, // unused
-                            0, // unused
-                        );
-                    },
-                    .ident => {
-                        try writer.l_label_pcrel(
-                            .@"jlr",
-                            link,
-                            target,
-                        );
-                    },
-                    else => @panic("Expected register or label!"),
-                }
-            },
+                    const m_opcode: isa.MTypeCode = switch (m) {
+                        .@"ld.b" => .@"ld.b",
+                        .@"st.b" => .@"st.b",
+                        .@"ld.w" => .@"ld.w",
+                        .@"st.w" => .@"st.w",
+                        .@"ld.d" => .@"ld.d",
+                        .@"st.d" => .@"st.d",
+                        .@"ld", .@"ld.q" => .@"ld.q",
+                        .@"st", .@"st.q" => .@"st.q",
+                        else => unreachable,
+                    };
 
-            .@"ld", .@"ld.b", .@"ld.w", .@"ld.d", .@"ld.q",
-            .@"st", .@"st.b", .@"st.w", .@"st.d", .@"st.q"
-            => {
-                const value_reg = tokenizer.readRegister();
-                _ = tokenizer.expect(.comma);
-                _ = value_reg;
-
-                const m_opcode: isa.MTypeCode = switch(m) {
-                    .@"ld.b" => .@"ld.b",
-                    .@"st.b" => .@"st.b",
-                    .@"ld.w" => .@"ld.w",
-                    .@"st.w" => .@"st.w",
-                    .@"ld.d" => .@"ld.d",
-                    .@"st.d" => .@"st.d",
-                    .@"ld", .@"ld.q" => .@"ld.q",
-                    .@"st", .@"st.q" => .@"st.q",
-                    else => unreachable,
-                };
-
-                switch(tokenizer.next().value) {
-                    .paren_open => {
-                        // M-type reg relative load/store 
-                        const label = tokenizer.peek();
-                        switch(label.value) {
-                            .ident => {
-                                // PC-Relative label access
-                                try writer.m(
-                                    m_opcode,
-                                    value_reg,
-                                    .pc,
-                                    0, // relocated
-                                );
-                                try writer.maybeRelocLastInstr(label, .m_imm_pcrel, 0);
-                            },
-                            .register => |memory_reg| {
-                                // Register relative immediate access
-                                try writer.m(m_opcode, value_reg, memory_reg, 0);
-                            },
-                            else => @panic("Bad load/store memory operand!"),
-                        }
-                    },
-                    .integer => |imm| {
-                        // Do we have a register operand too?
-                        if(tokenizer.peek().value == .paren_open) {
+                    switch (tokenizer.next().value) {
+                        .paren_open => {
                             // M-type reg relative load/store
-                            _ = tokenizer.expect(.paren_open);
                             const label = tokenizer.peek();
-                            switch(label.value) {
+                            switch (label.value) {
                                 .ident => {
                                     // PC-Relative label access
                                     try writer.m(
@@ -505,160 +475,180 @@ fn handleSourceFile(input: []const u8, writer: *Writer) !void {
                                         .pc,
                                         0, // relocated
                                     );
-                                    try writer.maybeRelocLastInstr(label, .m_imm_pcrel, imm);
+                                    try writer.maybeRelocLastInstr(label, .m_imm_pcrel, 0);
                                 },
                                 .register => |memory_reg| {
                                     // Register relative immediate access
-                                    try writer.m(m_opcode, value_reg, memory_reg, @truncate(u16, imm));
+                                    try writer.m(m_opcode, value_reg, memory_reg, 0);
                                 },
                                 else => @panic("Bad load/store memory operand!"),
                             }
-                        } else {
-                            // L-type load/store
-                            const opcode: isa.LTypeCode = switch(m) {
-                                .@"ld.d" => .@"ld.d",
-                                .@"ld.q" => .@"ld.q",
-                                .@"st.d" => .@"st.d",
-                                .@"st.q" => .@"st.q",
+                        },
+                        .integer => |imm| {
+                            // Do we have a register operand too?
+                            if (tokenizer.peek().value == .paren_open) {
+                                // M-type reg relative load/store
+                                _ = tokenizer.expect(.paren_open);
+                                const label = tokenizer.peek();
+                                switch (label.value) {
+                                    .ident => {
+                                        // PC-Relative label access
+                                        try writer.m(
+                                            m_opcode,
+                                            value_reg,
+                                            .pc,
+                                            0, // relocated
+                                        );
+                                        try writer.maybeRelocLastInstr(label, .m_imm_pcrel, imm);
+                                    },
+                                    .register => |memory_reg| {
+                                        // Register relative immediate access
+                                        try writer.m(m_opcode, value_reg, memory_reg, @truncate(u16, imm));
+                                    },
+                                    else => @panic("Bad load/store memory operand!"),
+                                }
+                            } else {
+                                // L-type load/store
+                                const opcode: isa.LTypeCode = switch (m) {
+                                    .@"ld.d" => .@"ld.d",
+                                    .@"ld.q" => .@"ld.q",
+                                    .@"st.d" => .@"st.d",
+                                    .@"st.q" => .@"st.q",
+                                    else => unreachable,
+                                };
+
+                                try writer.l_unsigned(
+                                    opcode,
+                                    value_reg,
+                                    @truncate(u21, imm),
+                                );
+                            }
+                        },
+                        else => @panic("Bad load/store second operand"),
+                    }
+                },
+                // zig fmt: off
+                .@"add", .@"sub", .@"mul", .@"div", .@"mod",
+                .@"and", .@"or", .@"xor", .@"sex", .@"shl", .@"lsr", .@"asr",
+                .@"ldp.b", .@"ldp.w", .@"ldp.d", .@"ldp.q", .@"ldp",
+                .@"stp.b", .@"stp.w", .@"stp.d", .@"stp.q", .@"stp",
+                .@"mcp", .@"mst",
+                // zig fmt: on
+                => {
+                    const dest = tokenizer.readRegister();
+                    _ = tokenizer.expect(.comma);
+                    const lhs = tokenizer.readRegister();
+                    _ = tokenizer.expect(.comma);
+
+                    switch (tokenizer.next().value) {
+                        .integer => |imm| {
+                            const opcode: isa.MTypeCode = switch (m) {
+                                .@"add" => .@"add",
+                                .@"sub" => .@"sub",
                                 else => unreachable,
                             };
 
-                            try writer.l_unsigned(
+                            try writer.m(
                                 opcode,
-                                value_reg,
-                                @truncate(u21, imm),
+                                dest,
+                                lhs,
+                                @intCast(u16, imm),
                             );
-                        }
-                    },
-                    else => @panic("Bad load/store second operand"),
-                }
+                        },
+                        .register => |rhs| {
+                            const opcode: isa.RTypeCode = switch (m) {
+                                .@"add" => .@"add",
+                                .@"sub" => .@"sub",
+                                .@"mul" => .@"mul",
+                                .@"div" => .@"div",
+                                .@"mod" => .@"mod",
+                                .@"and" => .@"and",
+                                .@"or" => .@"or",
+                                .@"xor" => .@"xor",
+                                .@"sex" => .@"sex",
+                                .@"shl" => .@"shl",
+                                .@"lsr" => .@"lsr",
+                                .@"asr" => .@"asr",
+                                .@"mcp" => .@"mcp",
+                                .@"mst" => .@"mst",
+                                else => unreachable,
+                            };
+
+                            try writer.r(
+                                opcode,
+                                .qword, // TODO: Truncating versions of these mnemonics??
+                                dest,
+                                lhs,
+                                rhs,
+                                0, // TODO: Immediate/shamts
+                            );
+                        },
+                        .paren_open => {
+                            const memory_reg = tokenizer.readRegister();
+                            _ = tokenizer.expect(.paren_close);
+
+                            const opcode: isa.RTypeCode = switch (m) {
+                                .@"ldp.b", .@"ldp.w", .@"ldp.d", .@"ldp.q", .@"ldp" => .@"ldp",
+                                .@"stp.b", .@"stp.w", .@"stp.d", .@"stp.q", .@"stp" => .@"stp",
+                                else => unreachable,
+                            };
+
+                            const size: isa.OperandSize = switch (m) {
+                                .@"ldp.b", .@"stp.b" => .byte,
+                                .@"ldp.w", .@"stp.w" => .word,
+                                .@"ldp.d", .@"stp.d" => .dword,
+                                .@"ldp", .@"stp", .@"ldp.q", .@"stp.q" => .qword,
+                                else => unreachable,
+                            };
+
+                            try writer.r(
+                                opcode,
+                                size,
+                                dest,
+                                lhs,
+                                memory_reg,
+                                0,
+                            );
+                        },
+                        else => @panic("Expected integer or register!"),
+                    }
+                    _ = dest;
+                    _ = lhs;
+                },
+                .@"ret" => {
+                    try writer.r(
+                        .@"jlr",
+                        .qword,
+                        .zero,
+                        .ra,
+                        .zero, // unused
+                        0, // unused
+                    );
+                },
+                .@"call" => {
+                    try writer.l_label_pcrel(
+                        .@"jlr",
+                        .ra,
+                        tokenizer.expect(.ident),
+                    );
+                },
+                .@"jmp" => {
+                    try writer.l_label_pcrel(
+                        .@"jlr",
+                        .zero,
+                        tokenizer.expect(.ident),
+                    );
+                },
             },
-
-            .@"add", .@"sub", .@"mul", .@"div", .@"mod",
-            .@"and", .@"or",  .@"xor", .@"sex", .@"shl", .@"lsr", .@"asr",
-            .@"ldp", .@"stp", .@"ldp.b", .@"stp.b", .@"ldp.w", .@"stp.w", .@"ldp.d", .@"stp.d", .@"ldp.q", .@"stp.q",
-            .@"mcp", .@"mst",
-            => {
-                const dest = tokenizer.readRegister();
-                _ = tokenizer.expect(.comma);
-                const lhs = tokenizer.readRegister();
-                _ = tokenizer.expect(.comma);
-                
-                switch(tokenizer.next().value) {
-                    .integer => |imm| {
-                        const opcode: isa.MTypeCode = switch(m) {
-                            .@"add" => .@"add",
-                            .@"sub" => .@"sub",
-                            else => unreachable,
-                        };
-
-                        try writer.m(
-                            opcode,
-                            dest,
-                            lhs,
-                            @intCast(u16, imm),
-                        );
-                    },
-                    .register => |rhs| {
-                        const opcode: isa.RTypeCode = switch(m) {
-                            .@"add" => .@"add",
-                            .@"sub" => .@"sub",
-                            .@"mul" => .@"mul",
-                            .@"div" => .@"div",
-                            .@"mod" => .@"mod",
-                            .@"and" => .@"and",
-                            .@"or"  => .@"or",
-                            .@"xor" => .@"xor",
-                            .@"sex" => .@"sex",
-                            .@"shl" => .@"shl",
-                            .@"lsr" => .@"lsr",
-                            .@"asr" => .@"asr",
-                            .@"mcp" => .@"mcp",
-                            .@"mst" => .@"mst",
-                            else => unreachable,
-                        };
-
-                        try writer.r(
-                            opcode,
-                            .qword, // TODO: Truncating versions of these mnemonics??
-                            dest,
-                            lhs,
-                            rhs,
-                            0, // TODO: Immediate/shamts
-                        );
-                    },
-                    .paren_open => {
-                        const memory_reg = tokenizer.readRegister();
-                        _ = tokenizer.expect(.paren_close);
-
-                        const opcode: isa.RTypeCode = switch(m) {
-                            .@"ldp.b", .@"ldp.w", .@"ldp.d", .@"ldp.q", .@"ldp" => .@"ldp",
-                            .@"stp.b", .@"stp.w", .@"stp.d", .@"stp.q", .@"stp" => .@"stp",
-                            else => unreachable,
-                        };
-
-                        const size: isa.OperandSize = switch(m) {
-                            .@"ldp.b", .@"stp.b" => .byte,
-                            .@"ldp.w", .@"stp.w" => .word,
-                            .@"ldp.d", .@"stp.d" => .dword,
-                            .@"ldp", .@"stp",
-                            .@"ldp.q", .@"stp.q" => .qword,
-                            else => unreachable,
-                        };
-
-                        try writer.r(
-                            opcode,
-                            size,
-                            dest,
-                            lhs,
-                            memory_reg,
-                            0,
-                        );
-                    },
-                    else => @panic("Expected integer or register!"),
-                }
-                _ = dest;
-                _ = lhs;
+            .ident => {
+                try writer.addLabel(token);
+                _ = tokenizer.expect(.colon);
             },
-
-            .@"ret" => {
-                try writer.r(
-                    .@"jlr",
-                    .qword,
-                    .zero,
-                    .ra,
-                    .zero, // unused
-                    0, // unused
-                );
+            else => {
+                std.debug.panic("Expected mnemonic or label, got {}", .{token});
             },
-
-            .@"call" => {
-                try writer.l_label_pcrel(
-                    .@"jlr",
-                    .ra,
-                    tokenizer.expect(.ident),
-                );
-            },
-
-            .@"jmp" => {
-                try writer.l_label_pcrel(
-                    .@"jlr",
-                    .zero,
-                    tokenizer.expect(.ident),
-                );
-            }
-        },
-
-        .ident => {
-            try writer.addLabel(token);
-            _ = tokenizer.expect(.colon);
-        },
-
-        else => {
-            std.debug.panic("Expected mnemonic or label, got {}", .{token});
-        },
+        }
     }
-}
 }
 
 pub fn main() !void {
@@ -681,6 +671,5 @@ pub fn main() !void {
     var writer = Writer.init(0x10000000, &output_bytes);
 
     try handleSourceFile(source, &writer);
-
     try output_file.writeAll(output_bytes.items);
 }

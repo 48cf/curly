@@ -163,17 +163,20 @@ pub fn main() !void {
     _ = args.next();
 
     const binary_path = args.next() orelse @panic("Expected binary path as first argument");
-
     const binary_file = try std.fs.cwd().openFile(binary_path, .{});
 
     _ = try binary_file.readAll(machine.memory.dram.items);
 
     var last_pc = machine.cpu.load(.pc);
-    while(true) {
+    while (true) {
         machine.step();
+
         const curr_pc = machine.cpu.load(.pc);
-        if(last_pc == curr_pc)
+
+        if (last_pc == curr_pc) {
             break;
+        }
+
         last_pc = curr_pc;
     }
 }
