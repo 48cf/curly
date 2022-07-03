@@ -16,6 +16,7 @@ pub const RTypeCode = enum(u7) {
     @"sub" = 0b0000001,
     @"mul" = 0b0000010,
     @"div" = 0b0000011,
+    @"mod" = 0b0000100,
     // ...
     @"and" = 0b0010000,
     @"or" = 0b0010001,
