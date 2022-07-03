@@ -77,6 +77,7 @@ const Mnemonic = enum {
     // Pseudoinstructions
     @"ret",
     @"call",
+    @"jmp",
 
     //@"li",
 };
@@ -638,6 +639,14 @@ fn handleSourceFile(input: []const u8, writer: *Writer) !void {
                     tokenizer.expect(.ident),
                 );
             },
+
+            .@"jmp" => {
+                try writer.l_label_pcrel(
+                    .@"jlr",
+                    .zero,
+                    tokenizer.expect(.ident),
+                );
+            }
         },
 
         .ident => {
