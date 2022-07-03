@@ -67,7 +67,13 @@ const Cpu = struct {
         self.store(.pc, self.load(.pc) +% 4);
 
         switch (instr) {
-            .r => |encoded| std.debug.panic("Unhandled R-type opcode: {s}", .{@tagName(encoded.code)}),
+            .r => |encoded| switch (encoded.code) {
+                .@"jlr" => {
+                    self.store(encoded.dest, self.load(.pc));
+                    self.store(.pc, self.load(encoded.lhs));
+                },
+                else => std.debug.panic("Unhandled R-type opcode: {s}", .{@tagName(encoded.code)}),
+            },
             .m => |encoded| switch (encoded.code) {
                 .@"add" => self.store(encoded.reg1, self.load(encoded.reg2) +% @as(u64, encoded.imm)),
                 .@"sub" => self.store(encoded.reg1, self.load(encoded.reg2) -% @as(u64, encoded.imm)),
@@ -100,12 +106,18 @@ const Cpu = struct {
                         else => unreachable,
                     }
                 },
-                .@"jz", .@"jnz" => {
+                .@"jz", .@"jnz", .@"jlr" => {
                     const target = self.load(.pc) +% @bitCast(u64, @as(i64, encoded.imm) * 4);
-                    const value = self.load(encoded.reg);
 
-                    if ((value == 0) == (encoded.code == .@"jz")) {
+                    if (encoded.code == .@"jlr") {
+                        self.store(encoded.reg, self.load(.pc));
                         self.store(.pc, target);
+                    } else {
+                        const value = self.load(encoded.reg);
+
+                        if ((value == 0) == (encoded.code == .@"jz")) {
+                            self.store(.pc, target);
+                        }
                     }
                 },
                 .@"rmsr", .@"wmsr" => {
