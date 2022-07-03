@@ -59,8 +59,9 @@ pub const LTypeCode = enum(u4) {
     @"or.d" = 0b0101,
     @"xor.d" = 0b0110,
     // ...
-    @"jz" = 0b1100,
-    @"jnz" = 0b1101,
+    @"jz" = 0b1000,
+    @"jnz" = 0b1001,
+    @"jlr" = 0b1100,
     @"rmsr" = 0b1110,
     @"wmsr" = 0b1111,
 };
