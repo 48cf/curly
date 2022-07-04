@@ -43,7 +43,15 @@ const Cpu = struct {
     regs: [31]u64 = std.mem.zeroes([31]u64),
     msrs: std.EnumArray(isa.Msr, u64) = std.EnumArray(isa.Msr, u64).initFill(0),
 
-    fn load(self: *Cpu, reg: isa.Register) u64 {
+    fn trap(self: *Cpu, cause: u64, addr: u64) void {
+        self.msrs.set(.trap_cause, cause);
+        self.msrs.set(.trap_pc, self.load(.pc) -% 4);
+        self.msrs.set(.trap_addr, addr);
+
+        self.store(.pc, self.msrs.get(.trap_vec));
+    }
+
+    fn load(self: *const Cpu, reg: isa.Register) u64 {
         return switch (reg) {
             .zero => 0,
             else => self.regs[@enumToInt(reg)],
@@ -57,10 +65,20 @@ const Cpu = struct {
         };
     }
 
-    fn execute(self: *Cpu, bus: *MemoryBus, opcode: u32) void {
-        const instr = isa.Instruction.decode(opcode) catch |err| {
-            std.debug.panic("Failed to decode instruction: {}", .{err});
-        };
+    fn loadMemory(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64) T {
+        _ = self;
+        return bus.load(T, addr);
+    }
+
+    fn storeMemory(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64, value: T) void {
+        _ = self;
+        bus.store(T, addr, value);
+    }
+
+    // TODO: Replace MemoryBus.load/store calls with loadMemory/storeMemory
+    fn execute(self: *Cpu, bus: *MemoryBus) void {
+        const opcode = self.loadMemory(u32, bus, self.load(.pc));
+        const instr = isa.Instruction.decode(opcode) catch return self.trap(0x0, 0x0);
 
         // std.log.debug("{b:0>32} - {}", .{ opcode, instr });
 
@@ -72,6 +90,7 @@ const Cpu = struct {
                     self.store(encoded.dest, self.load(.pc));
                     self.store(.pc, self.load(encoded.lhs));
                 },
+                .@"udi" => return self.trap(0x0, 0x0),
                 else => std.debug.panic("Unhandled R-type opcode: {s}", .{@tagName(encoded.code)}),
             },
             .m => |encoded| switch (encoded.code) {
@@ -141,9 +160,7 @@ const Machine = struct {
     memory: MemoryBus,
 
     fn step(self: *Machine) void {
-        const opcode = self.memory.load(u32, self.cpu.load(.pc));
-
-        self.cpu.execute(&self.memory, opcode);
+        self.cpu.execute(&self.memory);
     }
 };
 

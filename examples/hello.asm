@@ -1,4 +1,7 @@
 start:
+    ld r0, (trap_stub)
+    wmsr r0, trap_vec
+
     ldi r0, 72
     call output_ch
 
@@ -19,6 +22,8 @@ start:
     ld.q r1, -0x8(output_stub)
     call r1
 
+    udi
+
 loop:
     jmp loop
 
@@ -26,3 +31,15 @@ loop:
 output_stub:
 
 .include uart.asm
+
+trap_stub:
+    .dq trap_handler
+
+trap_handler:
+    ldi r0, 33
+    call output_ch
+
+    ldi r0, 10
+    call output_ch
+
+    jmp loop

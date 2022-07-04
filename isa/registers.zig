@@ -35,8 +35,7 @@ pub const Msr = enum(u21) {
     user_pt_addr,
 
     // Traps
-    trap_config = 0x00100,
-    trap_vec,
+    trap_vec = 0x00100,
     trap_cause,
     trap_pc,
     trap_addr,
