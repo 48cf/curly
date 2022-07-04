@@ -675,7 +675,7 @@ pub fn main() !void {
     const output_file = try std.fs.cwd().createFile(output_path, .{ .truncate = true });
     defer output_file.close();
 
-    const source = try source_file.readToEndAlloc(std.heap.page_allocator, 1024 * 1024 * 32);
+    const source = try source_file.readToEndAlloc(std.heap.page_allocator, std.math.maxInt(usize));
     defer std.heap.page_allocator.free(source);
 
     var output_bytes = std.ArrayList(u8).init(std.heap.page_allocator);
