@@ -250,7 +250,7 @@ const Relocation = struct {
     kind: RelocationKind,
 
     fn patch(self: @This(), data: []u8, value: usize, base_address: u64) void {
-        const offset = value + self.value_offset -% (self.write_offset + 4);
+        const offset = value +% self.value_offset -% (self.write_offset + 4);
         const old_value = std.mem.readIntLittle(u32, data[self.write_offset..][0..4]);
 
         switch (self.kind) {
