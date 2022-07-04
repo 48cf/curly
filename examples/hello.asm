@@ -17,7 +17,7 @@ start:
 
     ldi r0, 10
     ld.q r1, -0x8(output_stub)
-    jlr ra, r1
+    call r1
 
 loop:
     jmp loop

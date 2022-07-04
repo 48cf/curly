@@ -660,11 +660,13 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                     );
                 },
                 .@"call" => {
-                    try writer.l_label_pcrel(
-                        .@"jlr",
-                        .ra,
-                        tokenizer.expect(.ident),
-                    );
+                    const next = tokenizer.next();
+
+                    switch (next.value) {
+                        .ident => try writer.l_label_pcrel(.@"jlr", .ra, next),
+                        .register => |reg| try writer.r(.@"jlr", .qword, .ra, reg, .zero, 0),
+                        else => unreachable,
+                    }
                 },
                 .@"jmp" => {
                     try writer.l_label_pcrel(
