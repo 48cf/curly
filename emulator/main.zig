@@ -39,10 +39,53 @@ const MemoryBus = struct {
     }
 };
 
+const AccessType = enum {
+    Read,
+    Write,
+    Execute,
+};
+
 const Cpu = struct {
     regs: [31]u64 = std.mem.zeroes([31]u64),
     msrs: std.EnumArray(isa.Msr, u64) = std.EnumArray(isa.Msr, u64).initFill(0),
     last_pc: u64 = 0,
+
+    fn msrInfo(msr: isa.Msr) isa.MSRInfo {
+        const privileged_rw = isa.MSRInfo {
+            .privileged_readable = true,
+            .privileged_writable = true,
+            .unprivileged_readable = false,
+            .unprivileged_writable = false,
+        };
+
+        return switch(msr) {
+            .paging_config,
+            .kernel_base,
+            .kernel_pt_addr,
+            .user_pt_addr,
+            .trap_vec,
+            .trap_info,
+            .trap_cause,
+            .trap_pc,
+            .trap_addr,
+            => privileged_rw,
+
+            else => .{
+                .privileged_readable = false,
+                .privileged_writable = false,
+                .unprivileged_readable = false,
+                .unprivileged_writable = false,
+            },
+        };
+    }
+
+    fn privilegedAddr(self: Cpu, addr: u64) bool {
+        return addr >= self.msrs.get(.kernel_base);
+    }
+
+    fn privileged(self: Cpu) bool {
+        return self.privilegedAddr(self.last_pc);
+    }
 
     fn trap(self: *Cpu, cause: isa.TrapCause, info: u64, addr: u64) void {
         self.msrs.set(.trap_cause, @enumToInt(cause));
@@ -80,18 +123,21 @@ const Cpu = struct {
     }
 
     fn loadLinear(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64) ?T {
-        const kernel_base = self.msrs.get(.kernel_base);
-        if(addr >= kernel_base) {
-            if(self.load(.pc) - 4 < kernel_base) {
-                self.trap(.Privilege, 0, addr);
-                return null;
-            }
-            // TODO: Check if kernel paging is enabled and use that instead if enabled
-            return self.loadPhysical(T, bus, addr - kernel_base);
-        } else {
-            // TODO: Check if user paging is enabled and use that instead if enabled
-            return self.loadPhysical(T, bus, addr);
+        if(self.privilegedAddr(addr) and !self.privileged()) {
+            self.trap(.Privilege, 0, addr);
+            return null;
         }
+        // TODO: Do something about loads across page boundaries
+        return self.loadPhysical(T, bus, self.resolvePhys(addr, bus, .Read) orelse return null);
+    }
+
+    fn loadInstrLinear(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64) ?T {
+        if(self.privilegedAddr(addr) and !self.privileged()) {
+            self.trap(.Privilege, 0, addr);
+            return null;
+        }
+        // TODO: Do something about loads across page boundaries
+        return self.loadPhysical(T, bus, self.resolvePhys(addr, bus, .Execute) orelse return null);
     }
 
     fn storePhysical(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64, value: T) ?void {
@@ -101,35 +147,33 @@ const Cpu = struct {
     }
 
     fn storeLinear(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64, value: T) ?void {
-        const kernel_base = self.msrs.get(.kernel_base);
-        if(addr >= kernel_base) {
-            if(self.load(.pc) - 4 < kernel_base) {
-                self.trap(.Privilege, 1, addr);
-                return null;
-            }
-            // TODO: Check if kernel paging is enabled and use that instead if enabled
-            return self.storePhysical(T, bus, addr - kernel_base, value);
-        } else {
-            // TODO: Check if user paging is enabled and use that instead if enabled
-            return self.storePhysical(T, bus, addr, value);
+        if(self.privilegedAddr(addr) and !self.privileged()) {
+            self.trap(.Privilege, 1, addr);
+            return null;
         }
+        // TODO: Do something about stores across page boundaries
+        return self.storePhysical(T, bus, self.resolvePhys(addr, bus, .Write) orelse return null, value);
+    }
+
+    fn resolvePhys(self: *Cpu, vaddr: u64, bus: *MemoryBus, access_type: AccessType) ?u64 {
+        _ = bus;
+        _ = access_type;
+        _ = self;
+        // TODO: Implement paging
+        return vaddr;
     }
 
     fn jump(self: *Cpu, addr: u64) ?void {
-        const kernel_base = self.msrs.get(.kernel_base);
-        if(addr >= kernel_base) {
-            if(self.load(.pc) - 4 < kernel_base) {
-                self.trap(.Privilege, 2, addr);
-                return null;
-            }
+        if(self.privilegedAddr(addr) and !self.privileged()) {
+            self.trap(.Privilege, 2, addr);
+            return null;
         }
         self.storeDirect(.pc, addr);
         return {};
     }
 
-    // TODO: Replace MemoryBus.load/store calls with loadMemory/storeMemory
     fn execute(self: *Cpu, bus: *MemoryBus) void {
-        const opcode = self.loadLinear(u32, bus, self.load(.pc)) orelse return;
+        const opcode = self.loadInstrLinear(u32, bus, self.load(.pc)) orelse return;
         const instr = isa.Instruction.decode(opcode) catch return self.trap(.UndefinedInstruction, opcode, 0);
 
         // std.log.debug("{b:0>32} - {}", .{ opcode, instr });
@@ -199,10 +243,27 @@ const Cpu = struct {
                 .@"rmsr", .@"wmsr" => {
                     const msr_u21 = @bitCast(u21, encoded.imm);
                     const msr = truncateIntoEnum(isa.Msr, msr_u21) catch std.debug.panic("Invalid MSR: 0x{X:0>5}", .{msr_u21});
+                    const info = msrInfo(msr);
+                    const fault_info = info.encode() |
+                        (@as(u64, @boolToInt(encoded.code == .@"wmsr")) << 62) | (@as(u64, @boolToInt(self.privileged())) << 63);
 
                     switch (encoded.code) {
-                        .@"rmsr" => _ = self.storeChecked(encoded.reg, self.msrs.get(msr)),
-                        .@"wmsr" => self.msrs.set(msr, self.load(encoded.reg)),
+                        .@"rmsr" => {
+                            if(self.privileged()) {
+                                if(!info.privileged_readable) return self.trap(.InvalidMSR, fault_info, msr_u21);
+                            } else {
+                                if(!info.unprivileged_readable) return self.trap(.InvalidMSR, fault_info, msr_u21);
+                            }
+                            _ = self.storeChecked(encoded.reg, self.msrs.get(msr));
+                        },
+                        .@"wmsr" => {
+                            if(self.privileged()) {
+                                if(!info.privileged_writable) return self.trap(.InvalidMSR, fault_info, msr_u21);
+                            } else {
+                                if(!info.unprivileged_writable) return self.trap(.InvalidMSR, fault_info, msr_u21);
+                            }
+                            self.msrs.set(msr, self.load(encoded.reg));
+                        },
                         else => unreachable,
                     }
                 },
