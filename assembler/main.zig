@@ -465,7 +465,7 @@ fn handleSourceFile(input: []const u8, writer: *Writer) !void {
                     switch (tokenizer.next().value) {
                         .paren_open => {
                             // M-type reg relative load/store
-                            const label = tokenizer.peek();
+                            const label = tokenizer.next();
                             switch (label.value) {
                                 .ident => {
                                     // PC-Relative label access
@@ -483,13 +483,14 @@ fn handleSourceFile(input: []const u8, writer: *Writer) !void {
                                 },
                                 else => @panic("Bad load/store memory operand!"),
                             }
+                            _ = tokenizer.expect(.paren_close);
                         },
                         .integer => |imm| {
                             // Do we have a register operand too?
                             if (tokenizer.peek().value == .paren_open) {
                                 // M-type reg relative load/store
                                 _ = tokenizer.expect(.paren_open);
-                                const label = tokenizer.peek();
+                                const label = tokenizer.next();
                                 switch (label.value) {
                                     .ident => {
                                         // PC-Relative label access
@@ -507,6 +508,7 @@ fn handleSourceFile(input: []const u8, writer: *Writer) !void {
                                     },
                                     else => @panic("Bad load/store memory operand!"),
                                 }
+                                _ = tokenizer.expect(.paren_close);
                             } else {
                                 // L-type load/store
                                 const opcode: isa.LTypeCode = switch (m) {
