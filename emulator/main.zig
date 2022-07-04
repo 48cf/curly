@@ -42,13 +42,15 @@ const MemoryBus = struct {
 const Cpu = struct {
     regs: [31]u64 = std.mem.zeroes([31]u64),
     msrs: std.EnumArray(isa.Msr, u64) = std.EnumArray(isa.Msr, u64).initFill(0),
+    last_pc: u64 = 0,
 
-    fn trap(self: *Cpu, cause: u64, addr: u64) void {
-        self.msrs.set(.trap_cause, cause);
-        self.msrs.set(.trap_pc, self.load(.pc) -% 4);
+    fn trap(self: *Cpu, cause: isa.TrapCause, info: u64, addr: u64) void {
+        self.msrs.set(.trap_cause, @enumToInt(cause));
+        self.msrs.set(.trap_info, info);
+        self.msrs.set(.trap_pc, self.last_pc);
         self.msrs.set(.trap_addr, addr);
 
-        self.store(.pc, self.msrs.get(.trap_vec));
+        self.storeDirect(.pc, self.msrs.get(.trap_vec));
     }
 
     fn load(self: *const Cpu, reg: isa.Register) u64 {
@@ -58,56 +60,107 @@ const Cpu = struct {
         };
     }
 
-    fn store(self: *Cpu, reg: isa.Register, value: u64) void {
+    fn storeDirect(self: *Cpu, reg: isa.Register, value: u64) void {
         return switch (reg) {
             else => self.regs[@enumToInt(reg)] = value,
             .zero => {},
         };
     }
 
-    fn loadMemory(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64) T {
+    fn storeChecked(self: *Cpu, reg: isa.Register, value: u64) ?void {
+        if(reg == .pc) {
+            return self.jump(value);
+        }
+        return self.storeDirect(reg, value);
+    }
+
+    fn loadPhysical(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64) ?T {
         _ = self;
         return bus.load(T, addr);
     }
 
-    fn storeMemory(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64, value: T) void {
+    fn loadLinear(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64) ?T {
+        const kernel_base = self.msrs.get(.kernel_base);
+        if(addr >= kernel_base) {
+            if(self.load(.pc) - 4 < kernel_base) {
+                self.trap(.Privilege, 0, addr);
+                return null;
+            }
+            // TODO: Check if kernel paging is enabled and use that instead if enabled
+            return self.loadPhysical(T, bus, addr - kernel_base);
+        } else {
+            // TODO: Check if user paging is enabled and use that instead if enabled
+            return self.loadPhysical(T, bus, addr);
+        }
+    }
+
+    fn storePhysical(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64, value: T) ?void {
         _ = self;
         bus.store(T, addr, value);
+        return {};
+    }
+
+    fn storeLinear(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64, value: T) ?void {
+        const kernel_base = self.msrs.get(.kernel_base);
+        if(addr >= kernel_base) {
+            if(self.load(.pc) - 4 < kernel_base) {
+                self.trap(.Privilege, 1, addr);
+                return null;
+            }
+            // TODO: Check if kernel paging is enabled and use that instead if enabled
+            return self.storePhysical(T, bus, addr - kernel_base, value);
+        } else {
+            // TODO: Check if user paging is enabled and use that instead if enabled
+            return self.storePhysical(T, bus, addr, value);
+        }
+    }
+
+    fn jump(self: *Cpu, addr: u64) ?void {
+        const kernel_base = self.msrs.get(.kernel_base);
+        if(addr >= kernel_base) {
+            if(self.load(.pc) - 4 < kernel_base) {
+                self.trap(.Privilege, 2, addr);
+                return null;
+            }
+        }
+        self.storeDirect(.pc, addr);
+        return {};
     }
 
     // TODO: Replace MemoryBus.load/store calls with loadMemory/storeMemory
     fn execute(self: *Cpu, bus: *MemoryBus) void {
-        const opcode = self.loadMemory(u32, bus, self.load(.pc));
-        const instr = isa.Instruction.decode(opcode) catch return self.trap(0x0, 0x0);
+        const opcode = self.loadLinear(u32, bus, self.load(.pc)) orelse return;
+        const instr = isa.Instruction.decode(opcode) catch return self.trap(.UndefinedInstruction, opcode, 0);
 
         // std.log.debug("{b:0>32} - {}", .{ opcode, instr });
 
-        self.store(.pc, self.load(.pc) +% 4);
+        self.jump(self.load(.pc) +% 4) orelse return;
 
         switch (instr) {
             .r => |encoded| switch (encoded.code) {
                 .@"jlr" => {
-                    self.store(encoded.dest, self.load(.pc));
-                    self.store(.pc, self.load(encoded.lhs));
+                    const old_pc = self.load(.pc);
+                    self.jump(self.load(encoded.lhs)) orelse return;
+                    _ = self.storeChecked(encoded.dest, old_pc);
                 },
-                .@"udi" => return self.trap(0x0, 0x0),
+                .@"udi" => return self.trap(.UndefinedInstruction, opcode, 0),
                 else => std.debug.panic("Unhandled R-type opcode: {s}", .{@tagName(encoded.code)}),
             },
             .m => |encoded| switch (encoded.code) {
-                .@"add" => self.store(encoded.reg1, self.load(encoded.reg2) +% @as(u64, encoded.imm)),
-                .@"sub" => self.store(encoded.reg1, self.load(encoded.reg2) -% @as(u64, encoded.imm)),
+                .@"add" => _ = self.storeChecked(encoded.reg1, self.load(encoded.reg2) +% @as(u64, encoded.imm)),
+                .@"sub" => _ = self.storeChecked(encoded.reg1, self.load(encoded.reg2) -% @as(u64, encoded.imm)),
                 .@"ld.b", .@"ld.w", .@"ld.d", .@"ld.q", .@"st.b", .@"st.w", .@"st.d", .@"st.q" => {
                     const address = self.load(encoded.reg2) + encoded.imm;
 
                     switch (encoded.code) {
-                        .@"ld.b" => self.store(encoded.reg1, bus.load(u8, address)),
-                        .@"ld.w" => self.store(encoded.reg1, bus.load(u16, address)),
-                        .@"ld.d" => self.store(encoded.reg1, bus.load(u32, address)),
-                        .@"ld.q" => self.store(encoded.reg1, bus.load(u64, address)),
-                        .@"st.b" => bus.store(u8, address, @truncate(u8, self.load(encoded.reg1))),
-                        .@"st.w" => bus.store(u16, address, @truncate(u16, self.load(encoded.reg1))),
-                        .@"st.d" => bus.store(u32, address, @truncate(u32, self.load(encoded.reg1))),
-                        .@"st.q" => bus.store(u64, address, self.load(encoded.reg1)),
+                        .@"ld.b" => _ = self.storeChecked(encoded.reg1, self.loadLinear(u8, bus, address) orelse return),
+                        .@"ld.w" => _ = self.storeChecked(encoded.reg1, self.loadLinear(u16, bus, address) orelse return),
+                        .@"ld.d" => _ = self.storeChecked(encoded.reg1, self.loadLinear(u32, bus, address) orelse return),
+                        .@"ld.q" => _ = self.storeChecked(encoded.reg1, self.loadLinear(u64, bus, address) orelse return),
+                        .@"st.b" => _ = self.storeLinear(u8, bus, address, @truncate(u8, self.load(encoded.reg1))),
+                        .@"st.w" => _ = self.storeLinear(u16, bus, address, @truncate(u16, self.load(encoded.reg1))),
+                        .@"st.d" => _ = self.storeLinear(u32, bus, address, @truncate(u32, self.load(encoded.reg1))),
+                        .@"st.q" => _ = self.storeLinear(u64, bus, address, self.load(encoded.reg1)),
                         else => unreachable,
                     }
                 },
@@ -118,10 +171,10 @@ const Cpu = struct {
                     const address = @as(u64, @bitCast(u21, encoded.imm));
 
                     switch (encoded.code) {
-                        .@"ld.d" => self.store(encoded.reg, bus.load(u32, address)),
-                        .@"ld.q" => self.store(encoded.reg, bus.load(u64, address)),
-                        .@"st.d" => bus.store(u32, address, @truncate(u32, self.load(encoded.reg))),
-                        .@"st.q" => bus.store(u64, address, self.load(encoded.reg)),
+                        .@"ld.d" => _ = self.storeChecked(encoded.reg, self.loadLinear(u32, bus, address) orelse return),
+                        .@"ld.q" => _ = self.storeChecked(encoded.reg, self.loadLinear(u64, bus, address) orelse return),
+                        .@"st.d" => _ = self.storeLinear(u32, bus, address, @truncate(u32, self.load(encoded.reg))),
+                        .@"st.q" => _ = self.storeLinear(u64, bus, address, self.load(encoded.reg)),
                         else => unreachable,
                     }
                 },
@@ -129,26 +182,26 @@ const Cpu = struct {
                     const target = self.load(.pc) +% @bitCast(u64, @as(i64, encoded.imm) * 4);
 
                     if (encoded.code == .@"jlr") {
-                        self.store(encoded.reg, self.load(.pc));
-                        self.store(.pc, target);
+                        self.storeChecked(encoded.reg, self.load(.pc)) orelse return;
+                        _ = self.jump(target);
                     } else {
                         const value = self.load(encoded.reg);
 
                         if ((value == 0) == (encoded.code == .@"jz")) {
-                            self.store(.pc, target);
+                            _ = self.jump(target);
                         }
                     }
                 },
                 .@"adr" => {
                     const address = self.load(.pc) +% @bitCast(u64, @as(i64, @bitCast(i21, encoded.imm)) * 4);
-                    self.store(encoded.reg, address);
+                    _ = self.storeChecked(encoded.reg, address);
                 },
                 .@"rmsr", .@"wmsr" => {
                     const msr_u21 = @bitCast(u21, encoded.imm);
                     const msr = truncateIntoEnum(isa.Msr, msr_u21) catch std.debug.panic("Invalid MSR: 0x{X:0>5}", .{msr_u21});
 
                     switch (encoded.code) {
-                        .@"rmsr" => self.store(encoded.reg, self.msrs.get(msr)),
+                        .@"rmsr" => _ = self.storeChecked(encoded.reg, self.msrs.get(msr)),
                         .@"wmsr" => self.msrs.set(msr, self.load(encoded.reg)),
                         else => unreachable,
                     }
@@ -178,7 +231,7 @@ pub fn main() !void {
         .cpu = .{},
     };
 
-    machine.cpu.store(.pc, machine.memory.dram_base);
+    machine.cpu.storeDirect(.pc, machine.memory.dram_base);
 
     var args = try std.process.argsWithAllocator(std.heap.page_allocator);
     _ = args.next();
