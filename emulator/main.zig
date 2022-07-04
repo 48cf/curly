@@ -139,6 +139,10 @@ const Cpu = struct {
                         }
                     }
                 },
+                .@"adr" => {
+                    const address = self.load(.pc) +% @bitCast(u64, @as(i64, @bitCast(i21, encoded.imm)) * 4);
+                    self.store(encoded.reg, address);
+                },
                 .@"rmsr", .@"wmsr" => {
                     const msr_u21 = @bitCast(u21, encoded.imm);
                     const msr = truncateIntoEnum(isa.Msr, msr_u21) catch std.debug.panic("Invalid MSR: 0x{X:0>5}", .{msr_u21});

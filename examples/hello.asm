@@ -1,5 +1,5 @@
 start:
-    ld r0, (trap_stub)
+    adr r0, trap_handler
     wmsr r0, trap_vec
 
     ldi r0, 72
@@ -31,9 +31,6 @@ loop:
 output_stub:
 
 .include uart.asm
-
-trap_stub:
-    .dq trap_handler
 
 trap_handler:
     ldi r0, 33

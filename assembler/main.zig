@@ -49,6 +49,7 @@ const Mnemonic = enum {
     @"asr",
 
     @"jlr",
+    @"adr",
 
     @"rmsr",
     @"wmsr",
@@ -681,6 +682,12 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                         .zero, // unused
                         0, // unused
                     );
+                },
+                .@"adr" => {
+                    const reg = tokenizer.expect(.register).value.register;
+                    _ = tokenizer.expect(.comma);
+                    const label = tokenizer.expect(.ident);
+                    try writer.l_label_pcrel(.@"adr", reg, label);
                 },
                 .@"call" => {
                     const next = tokenizer.next();

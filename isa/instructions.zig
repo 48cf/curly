@@ -68,6 +68,7 @@ pub const LTypeCode = enum(u4) {
     @"jz" = 0b1000,
     @"jnz" = 0b1001,
     @"jlr" = 0b1100,
+    @"adr" = 0b1101,
     @"rmsr" = 0b1110,
     @"wmsr" = 0b1111,
 };
