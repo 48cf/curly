@@ -79,7 +79,7 @@ const Mnemonic = enum {
     @"call",
     @"jmp",
 
-    //@"li",
+    @"ldi",
 };
 
 fn hexValue(ch: u8) u4 {
@@ -638,6 +638,17 @@ fn handleSourceFile(input: []const u8, writer: *Writer) !void {
                         .zero,
                         tokenizer.expect(.ident),
                     );
+                },
+                .@"ldi" => {
+                    const dest = tokenizer.readRegister();
+                    _ = tokenizer.expect(.comma);
+                    const imm = tokenizer.expect(.integer).value.integer;
+
+                    if (@bitCast(i64, imm) < 0) {
+                        try writer.m(.@"sub", dest, .zero, @bitCast(u16, @truncate(i16, -@bitCast(i64, imm))));
+                    } else {
+                        try writer.m(.@"add", dest, .zero, @truncate(u16, imm));
+                    }
                 },
             },
             .ident => {
