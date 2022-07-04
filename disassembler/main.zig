@@ -15,10 +15,10 @@ pub fn main() !void {
 
     for (encoded) |encoded_instr, i| {
         const instr = isa.Instruction.decode(encoded_instr) catch {
-            std.log.info("{X:0>8}: ???", .{i * 4});
+            std.log.info("{X:0>8}: {X:0>8}  ???", .{ i * 4, encoded_instr });
             continue;
         };
 
-        std.log.info("{X:0>8}: {}", .{ i * 4, instr });
+        std.log.info("{X:0>8}: {X:0>8}  {}", .{ i * 4, encoded_instr, instr });
     }
 }
