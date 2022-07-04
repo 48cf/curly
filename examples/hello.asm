@@ -16,11 +16,13 @@ start:
     call output_ch
 
     ldi r0, 10
-    call output_ch
+    ld.q r1, -0x8(output_stub)
+    jlr ra, r1
 
 loop:
     jmp loop
 
-output_ch:
-    st.d r0, 0x10000
-    ret
+    .dq output_ch
+output_stub:
+
+.include uart.asm

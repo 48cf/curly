@@ -13,6 +13,7 @@ const TokenValue = union(enum) {
     register: isa.Register,
     msr: isa.Msr,
     mnemonic: Mnemonic,
+    keyword: Keyword,
 };
 
 const TokenKind = @typeInfo(TokenValue).Union.tag_type.?;
@@ -80,6 +81,15 @@ const Mnemonic = enum {
     @"jmp",
 
     @"ldi",
+};
+
+const Keyword = enum {
+    @".align",
+    @".include",
+    @".db",
+    @".dw",
+    @".dd",
+    @".dq",
 };
 
 fn hexValue(ch: u8) u4 {
@@ -169,6 +179,8 @@ const Tokenizer = struct {
 
             if (charsToEnum(Mnemonic, self.source[start..self.offset])) |m| {
                 return .{ .value = .{ .mnemonic = m }, .start = start, .source_bytes = self.source[start..self.offset] };
+            } else if (charsToEnum(Keyword, self.source[start..self.offset])) |kw| {
+                return .{ .value = .{ .keyword = kw }, .start = start, .source_bytes = self.source[start..self.offset] };
             } else if (charsToEnum(isa.Register, self.source[start..self.offset])) |reg| {
                 return .{ .value = .{ .register = reg }, .start = start, .source_bytes = self.source[start..self.offset] };
             } else if (charsToEnum(isa.Msr, self.source[start..self.offset])) |msr| {
@@ -295,6 +307,7 @@ const Writer = struct {
     }
 
     fn addLabel(self: *@This(), label: Token) !void {
+        try self.alignTo(4, 0x00);
         var i: usize = 0;
         while (i < self.relocations.items.len) {
             if (std.mem.eql(u8, self.relocations.items[i].source_bytes, label.source_bytes)) {
@@ -305,6 +318,20 @@ const Writer = struct {
             }
         }
         try self.labels.put(label.source_bytes, self.output_data.items.len);
+    }
+
+    fn alignTo(self: *@This(), alignment: usize, align_byte: u8) !void {
+        if (self.output_data.items.len % alignment != 0) {
+            try self.output_data.appendNTimes(align_byte, alignment - (self.output_data.items.len % alignment));
+        }
+    }
+
+    fn embedBytes(self: *@This(), bytes: []const u8) !void {
+        try self.output_data.appendSlice(bytes);
+    }
+
+    fn embedInt(self: *@This(), comptime T: type, value: T) !void {
+        try self.embedBytes(&std.mem.toBytes(value));
     }
 
     fn getLabelValue(self: *@This(), tok: Token) ?usize {
@@ -341,7 +368,8 @@ const Writer = struct {
         rhs: isa.Register,
         imm: u6,
     ) !void {
-        try self.output_data.writer().writeIntLittle(u32, isa.Instruction.encode(.{ .r = .{
+        try self.alignTo(4, 0x00);
+        try self.embedInt(u32, isa.Instruction.encode(.{ .r = .{
             .code = opcode,
             .size = size,
             .dest = dest,
@@ -369,7 +397,8 @@ const Writer = struct {
         reg2: isa.Register,
         imm: u16,
     ) !void {
-        try self.output_data.writer().writeIntLittle(u32, isa.Instruction.encode(.{ .m = .{
+        try self.alignTo(4, 0x00);
+        try self.embedInt(u32, isa.Instruction.encode(.{ .m = .{
             .code = code,
             .reg1 = reg1,
             .reg2 = reg2,
@@ -383,7 +412,8 @@ const Writer = struct {
         reg: isa.Register,
         imm: i21,
     ) !void {
-        try self.output_data.writer().writeIntLittle(u32, isa.Instruction.encode(.{ .l = .{
+        try self.alignTo(4, 0x00);
+        try self.embedInt(u32, isa.Instruction.encode(.{ .l = .{
             .code = code,
             .reg = reg,
             .imm = imm,
@@ -410,7 +440,9 @@ const Writer = struct {
     }
 };
 
-fn handleSourceFile(input: []const u8, writer: *Writer) !void {
+const AssemblerError = std.fs.File.OpenError || std.fs.File.ReadError || std.mem.Allocator.Error;
+
+fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) AssemblerError!void {
     var tokenizer = Tokenizer.init(input);
 
     while (true) {
@@ -653,13 +685,67 @@ fn handleSourceFile(input: []const u8, writer: *Writer) !void {
                     }
                 },
             },
+            .keyword => |kw| switch (kw) {
+                .@".align" => {
+                    var alignment = tokenizer.expect(.integer);
+                    var align_value: u8 = 0x00;
+
+                    if (tokenizer.peek().value == .comma) {
+                        _ = tokenizer.expect(.comma);
+                        align_value = @truncate(u8, tokenizer.expect(.integer).value.integer);
+                    }
+
+                    try writer.alignTo(alignment.value.integer, align_value);
+                },
+                .@".include" => {
+                    const file_name = tokenizer.expect(.ident); // FIXME: Use proper string literals there
+                    const current_source_dir = std.fs.path.dirname(path) orelse ".";
+                    const include_path = try std.fs.path.join(std.heap.page_allocator, &.{ current_source_dir, file_name.source_bytes });
+
+                    const source_file = try std.fs.cwd().openFile(include_path, .{});
+                    defer source_file.close();
+
+                    const source = try source_file.readToEndAlloc(std.heap.page_allocator, std.math.maxInt(usize));
+
+                    try handleSourceFile(include_path, source, writer);
+                },
+                .@".db", .@".dw", .@".dd", .@".dq" => {
+                    const operand = tokenizer.next();
+
+                    switch (operand.value) {
+                        .integer => |imm| switch (kw) {
+                            .@".db" => try writer.embedInt(u8, @truncate(u8, imm)),
+                            .@".dw" => try writer.embedInt(u16, @truncate(u16, imm)),
+                            .@".dd" => try writer.embedInt(u32, @truncate(u32, imm)),
+                            .@".dq" => try writer.embedInt(u64, @truncate(u64, imm)),
+                            else => unreachable,
+                        },
+                        .ident => {
+                            if (kw != .@".dq") {
+                                @panic("Can't use label reference with .db, .dw or .dd!");
+                            }
+
+                            if (writer.getLabelValue(operand)) |value| {
+                                try writer.embedInt(u64, value);
+                            } else {
+                                try writer.embedInt(u64, 0x00);
+                                try writer.relocations.append(.{
+                                    .write_offset = writer.output_data.items.len - 8,
+                                    .source_bytes = operand.source_bytes,
+                                    .kind = .abs64,
+                                    .value_offset = 0,
+                                });
+                            }
+                        },
+                        else => std.debug.panic("Expected integer or ident, got {}", .{operand}),
+                    }
+                },
+            },
             .ident => {
                 try writer.addLabel(token);
                 _ = tokenizer.expect(.colon);
             },
-            else => {
-                std.debug.panic("Expected mnemonic or label, got {}", .{token});
-            },
+            else => std.debug.panic("Expected mnemonic, directive or label, got {}", .{token}),
         }
     }
 }
@@ -683,6 +769,6 @@ pub fn main() !void {
     var output_bytes = std.ArrayList(u8).init(std.heap.page_allocator);
     var writer = Writer.init(0x10000000, &output_bytes);
 
-    try handleSourceFile(source, &writer);
+    try handleSourceFile(source_path, source, &writer);
     try output_file.writeAll(output_bytes.items);
 }
