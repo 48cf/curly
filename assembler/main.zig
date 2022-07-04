@@ -50,6 +50,9 @@ const Mnemonic = enum {
 
     @"jlr",
 
+    @"rmsr",
+    @"wmsr",
+
     @"mcp",
     @"mst",
 
@@ -479,6 +482,21 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                         },
                         else => @panic("Expected register or label!"),
                     }
+                },
+                .@"rmsr", .@"wmsr" => {
+                    const reg = tokenizer.readRegister();
+                    _ = tokenizer.expect(.comma);
+                    const msr = tokenizer.expect(.msr);
+
+                    try writer.l_unsigned(
+                        switch (m) {
+                            .@"rmsr" => .@"rmsr",
+                            .@"wmsr" => .@"wmsr",
+                            else => unreachable,
+                        },
+                        reg,
+                        @enumToInt(msr.value.msr),
+                    );
                 },
                 .@"hlt" => try writer.r(.@"hlt", .qword, .zero, .zero, .zero, 0),
                 .@"udi" => try writer.r(.@"udi", .qword, .zero, .zero, .zero, 0),
