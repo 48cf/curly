@@ -53,6 +53,9 @@ const Mnemonic = enum {
     @"mcp",
     @"mst",
 
+    @"hlt",
+    @"udi",
+
     @"ld",
     @"ld.b",
     @"ld.w",
@@ -477,6 +480,8 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                         else => @panic("Expected register or label!"),
                     }
                 },
+                .@"hlt" => try writer.r(.@"hlt", .qword, .zero, .zero, .zero, 0),
+                .@"udi" => try writer.r(.@"udi", .qword, .zero, .zero, .zero, 0),
                 .@"ld", .@"ld.b", .@"ld.w", .@"ld.d", .@"ld.q", .@"st", .@"st.b", .@"st.w", .@"st.d", .@"st.q" => {
                     const value_reg = tokenizer.readRegister();
                     _ = tokenizer.expect(.comma);
