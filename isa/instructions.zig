@@ -28,10 +28,13 @@ pub const RTypeCode = enum(u7) {
     // ...
     @"jlr" = 0b1000000,
     // ...
-    @"ldp" = 0b1111100,
-    @"stp" = 0b1111101,
-    @"mcp" = 0b1111110,
-    @"mst" = 0b1111111,
+    @"ldp" = 0b1110000,
+    @"stp" = 0b1110001,
+    @"mcp" = 0b1110010,
+    @"mst" = 0b1110011,
+    // ...
+    @"hlt" = 0b1111110,
+    @"udi" = 0b1111111,
 };
 
 pub const MTypeCode = enum(u4) {
