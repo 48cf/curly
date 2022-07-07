@@ -46,7 +46,7 @@ fn prettyPrintInstruction(instr: isa.Instruction, addr: u64, writer: anytype) !v
             }
             switch(i.code) {
                 .@"add", .@"sub",
-                .@"beq", .@"bne", .@"blt", .@"ble", .@"bge", .@"bgt",
+                .@"jeq", .@"jne", .@"jlt", .@"jle", .@"jge", .@"jgt",
                 => return writer.print("{s} {s}, {s}, 0x{X}", .{@tagName(i.code), @tagName(i.reg1), @tagName(i.reg2), target_branch}),
                 //else => try writer.print("{}\n", .{i}),
                 .@"ld.b", .@"ld.w", .@"ld.d", .@"ld.q",

@@ -48,6 +48,15 @@ const Mnemonic = enum {
     @"lsr",
     @"asr",
 
+    @"jeq",
+    @"jne",
+    @"jlt",
+    @"jle",
+    @"jgt",
+    @"jge",
+    @"jz",
+    @"jnz",
+
     @"jlr",
     @"adr",
 
@@ -485,6 +494,38 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                         },
                         else => @panic("Expected register or label!"),
                     }
+                },
+                .@"jeq", .@"jne", .@"jlt", .@"jle", .@"jgt", .@"jge" => {
+                    const m_opcode: isa.MTypeCode = switch (m) {
+                        .@"jeq" => .@"jeq",
+                        .@"jne" => .@"jne",
+                        .@"jlt" => .@"jlt",
+                        .@"jle" => .@"jle",
+                        .@"jgt" => .@"jgt",
+                        .@"jge" => .@"jge",
+                        else => unreachable,
+                    };
+
+                    const lhs = tokenizer.readRegister();
+                    _ = tokenizer.expect(.comma);
+                    const rhs = tokenizer.readRegister();
+                    _ = tokenizer.expect(.comma);
+                    const label = tokenizer.expect(.ident);
+
+                    try writer.m_label_pcrel(m_opcode, lhs, rhs, label);
+                },
+                .@"jz", .@"jnz" => {
+                    const l_opcode: isa.LTypeCode = switch (m) {
+                        .@"jz" => .@"jz",
+                        .@"jnz" => .@"jnz",
+                        else => unreachable,
+                    };
+
+                    const lhs = tokenizer.readRegister();
+                    _ = tokenizer.expect(.comma);
+                    const label = tokenizer.expect(.ident);
+
+                    try writer.l_label_pcrel(l_opcode, lhs, label);
                 },
                 .@"rmsr", .@"wmsr" => {
                     const reg = tokenizer.readRegister();
