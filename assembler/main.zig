@@ -813,4 +813,8 @@ pub fn main() !void {
 
     try handleSourceFile(source_path, source, &writer);
     try output_file.writeAll(output_bytes.items);
+
+    for (writer.relocations.items) |reloc| {
+        std.log.err("Undefined relocation to '{s}' at 0x{X:0>8}", .{ reloc.source_bytes, reloc.write_offset });
+    }
 }
