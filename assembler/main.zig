@@ -454,7 +454,9 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
 
     while (true) {
         const token = tokenizer.next();
-        std.log.info("Token: {}", .{token});
+
+        // std.log.info("Token: {}", .{token});
+
         switch (token.value) {
             .eof => return,
             .mnemonic => |m| switch (m) {
@@ -742,34 +744,42 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                     try handleSourceFile(include_path, source, writer);
                 },
                 .@".db", .@".dw", .@".dd", .@".dq" => {
-                    const operand = tokenizer.next();
+                    while (true) {
+                        const operand = tokenizer.next();
 
-                    switch (operand.value) {
-                        .integer => |imm| switch (kw) {
-                            .@".db" => try writer.embedInt(u8, @truncate(u8, imm)),
-                            .@".dw" => try writer.embedInt(u16, @truncate(u16, imm)),
-                            .@".dd" => try writer.embedInt(u32, @truncate(u32, imm)),
-                            .@".dq" => try writer.embedInt(u64, @truncate(u64, imm)),
-                            else => unreachable,
-                        },
-                        .ident => {
-                            if (kw != .@".dq") {
-                                @panic("Can't use label reference with .db, .dw or .dd!");
-                            }
+                        switch (operand.value) {
+                            .integer => |imm| switch (kw) {
+                                .@".db" => try writer.embedInt(u8, @truncate(u8, imm)),
+                                .@".dw" => try writer.embedInt(u16, @truncate(u16, imm)),
+                                .@".dd" => try writer.embedInt(u32, @truncate(u32, imm)),
+                                .@".dq" => try writer.embedInt(u64, @truncate(u64, imm)),
+                                else => unreachable,
+                            },
+                            .ident => {
+                                if (kw != .@".dq") {
+                                    @panic("Can't use label reference with .db, .dw or .dd!");
+                                }
 
-                            if (writer.getLabelValue(operand)) |value| {
-                                try writer.embedInt(u64, value);
-                            } else {
-                                try writer.embedInt(u64, 0x00);
-                                try writer.relocations.append(.{
-                                    .write_offset = writer.output_data.items.len - 8,
-                                    .source_bytes = operand.source_bytes,
-                                    .kind = .abs64,
-                                    .value_offset = 0,
-                                });
-                            }
-                        },
-                        else => std.debug.panic("Expected integer or ident, got {}", .{operand}),
+                                if (writer.getLabelValue(operand)) |value| {
+                                    try writer.embedInt(u64, value);
+                                } else {
+                                    try writer.embedInt(u64, 0x00);
+                                    try writer.relocations.append(.{
+                                        .write_offset = writer.output_data.items.len - 8,
+                                        .source_bytes = operand.source_bytes,
+                                        .kind = .abs64,
+                                        .value_offset = 0,
+                                    });
+                                }
+                            },
+                            else => std.debug.panic("Expected integer or ident, got {}", .{operand}),
+                        }
+
+                        if (tokenizer.peek().value != .comma) {
+                            break;
+                        }
+
+                        _ = tokenizer.expect(.comma);
                     }
                 },
             },
