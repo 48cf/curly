@@ -194,7 +194,7 @@ const Cpu = struct {
                 .@"add" => _ = self.storeChecked(encoded.reg1, self.load(encoded.reg2) +% @as(u64, encoded.imm)),
                 .@"sub" => _ = self.storeChecked(encoded.reg1, self.load(encoded.reg2) -% @as(u64, encoded.imm)),
                 .@"ld.b", .@"ld.w", .@"ld.d", .@"ld.q", .@"st.b", .@"st.w", .@"st.d", .@"st.q" => {
-                    const address = self.load(encoded.reg2) + encoded.imm;
+                    const address = self.load(encoded.reg2) +% @bitCast(u64, @as(i64, @bitCast(i16, encoded.imm)));
 
                     switch (encoded.code) {
                         .@"ld.b" => _ = self.storeChecked(encoded.reg1, self.loadLinear(u8, bus, address) orelse return),
