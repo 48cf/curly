@@ -187,6 +187,27 @@ const Cpu = struct {
                     self.jump(self.load(encoded.lhs)) orelse return;
                     _ = self.storeChecked(encoded.dest, old_pc);
                 },
+                .@"add", .@"sub", .@"mul", .@"div", .@"mod" => {
+                    const mask: u64 = switch (encoded.size) {
+                        .byte => 0xFF,
+                        .word => 0xFFFF,
+                        .dword => 0xFFFFFFFF,
+                        .qword => 0xFFFFFFFFFFFFFFFF,
+                    };
+
+                    const lhs = self.load(encoded.lhs);
+                    const rhs = self.load(encoded.rhs);
+                    const value = switch (encoded.code) {
+                        .@"add" => lhs + rhs,
+                        .@"sub" => lhs - rhs,
+                        .@"mul" => lhs * rhs,
+                        .@"div" => if (rhs != 0) lhs / rhs else return self.trap(.DivisionByZero, 0, 0),
+                        .@"mod" => if (rhs != 0) lhs % rhs else return self.trap(.DivisionByZero, 0, 0),
+                        else => unreachable,
+                    } & mask;
+
+                    _ = self.storeChecked(encoded.dest, value);
+                },
                 .@"udi" => return self.trap(.UndefinedInstruction, opcode, 0),
                 else => std.debug.panic("Unhandled R-type opcode: {s}", .{@tagName(encoded.code)}),
             },
@@ -292,26 +313,39 @@ pub fn main() !void {
         .cpu = .{},
     };
 
-    machine.cpu.storeDirect(.pc, machine.memory.dram_base);
-
     var args = try std.process.argsWithAllocator(std.heap.page_allocator);
     _ = args.next();
 
     const binary_path = args.next() orelse @panic("Expected binary path as first argument");
     const binary_file = try std.fs.cwd().openFile(binary_path, .{});
+    const bytes_read = try binary_file.readAll(machine.memory.dram.items);
 
-    _ = try binary_file.readAll(machine.memory.dram.items);
+    std.mem.copy(u8, machine.memory.dram.items[0x8000..], "Hello, world!\n\x00");
+
+    machine.cpu.storeDirect(.pc, machine.memory.dram_base + bytes_read - 4);
+    machine.cpu.storeDirect(.sp, machine.memory.dram_base + machine.memory.dram.items.len);
 
     var last_pc = machine.cpu.load(.pc);
+
     while (true) {
+        // const old_regs = machine.cpu.regs;
+
         machine.step();
 
-        const curr_pc = machine.cpu.load(.pc);
+        // for (machine.cpu.regs) |value, reg_i| {
+        //     const reg = @intToEnum(isa.Register, reg_i);
 
-        if (last_pc == curr_pc) {
+        //     if ((reg == .pc and value - 4 != old_regs[reg_i]) or (reg != .pc and value != old_regs[reg_i])) {
+        //         std.io.getStdOut().writer().print("   {s:>8} {X:0>16} -> {X:0>16}\n", .{ @tagName(reg), old_regs[reg_i], value }) catch {};
+        //     }
+        // }
+
+        const pc = machine.cpu.load(.pc);
+
+        if (pc == last_pc) {
             break;
         }
 
-        last_pc = curr_pc;
+        last_pc = pc;
     }
 }

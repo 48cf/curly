@@ -73,6 +73,9 @@ pub const TrapCause = enum(u64) {
     ///   trap_pc: Address of the violating instruction
     ///   trap_addr: MSR number
     InvalidMSR = 2,
+
+    /// Division by zero
+    DivisionByZero,
 };
 
 /// Bitfields of the following
