@@ -51,14 +51,14 @@ const Cpu = struct {
     last_pc: u64 = 0,
 
     fn msrInfo(msr: isa.Msr) isa.MSRInfo {
-        const privileged_rw = isa.MSRInfo {
+        const privileged_rw = isa.MSRInfo{
             .privileged_readable = true,
             .privileged_writable = true,
             .unprivileged_readable = false,
             .unprivileged_writable = false,
         };
 
-        return switch(msr) {
+        return switch (msr) {
             .paging_config,
             .kernel_base,
             .kernel_pt_addr,
@@ -111,7 +111,7 @@ const Cpu = struct {
     }
 
     fn storeChecked(self: *Cpu, reg: isa.Register, value: u64) ?void {
-        if(reg == .pc) {
+        if (reg == .pc) {
             return self.jump(value);
         }
         return self.storeDirect(reg, value);
@@ -123,7 +123,7 @@ const Cpu = struct {
     }
 
     fn loadLinear(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64) ?T {
-        if(self.privilegedAddr(addr) and !self.privileged()) {
+        if (self.privilegedAddr(addr) and !self.privileged()) {
             self.trap(.Privilege, 0, addr);
             return null;
         }
@@ -132,7 +132,7 @@ const Cpu = struct {
     }
 
     fn loadInstrLinear(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64) ?T {
-        if(self.privilegedAddr(addr) and !self.privileged()) {
+        if (self.privilegedAddr(addr) and !self.privileged()) {
             self.trap(.Privilege, 0, addr);
             return null;
         }
@@ -147,7 +147,7 @@ const Cpu = struct {
     }
 
     fn storeLinear(self: *Cpu, comptime T: type, bus: *MemoryBus, addr: u64, value: T) ?void {
-        if(self.privilegedAddr(addr) and !self.privileged()) {
+        if (self.privilegedAddr(addr) and !self.privileged()) {
             self.trap(.Privilege, 1, addr);
             return null;
         }
@@ -164,7 +164,7 @@ const Cpu = struct {
     }
 
     fn jump(self: *Cpu, addr: u64) ?void {
-        if(self.privilegedAddr(addr) and !self.privileged()) {
+        if (self.privilegedAddr(addr) and !self.privileged()) {
             self.trap(.Privilege, 2, addr);
             return null;
         }
@@ -175,8 +175,6 @@ const Cpu = struct {
     fn execute(self: *Cpu, bus: *MemoryBus) void {
         const opcode = self.loadInstrLinear(u32, bus, self.load(.pc)) orelse return;
         const instr = isa.Instruction.decode(opcode) catch return self.trap(.UndefinedInstruction, opcode, 0);
-
-        // std.log.debug("{b:0>32} - {}", .{ opcode, instr });
 
         self.jump(self.load(.pc) +% 4) orelse return;
 
@@ -270,18 +268,18 @@ const Cpu = struct {
 
                     switch (encoded.code) {
                         .@"rmsr" => {
-                            if(self.privileged()) {
-                                if(!info.privileged_readable) return self.trap(.InvalidMSR, fault_info, msr_u21);
+                            if (self.privileged()) {
+                                if (!info.privileged_readable) return self.trap(.InvalidMSR, fault_info, msr_u21);
                             } else {
-                                if(!info.unprivileged_readable) return self.trap(.InvalidMSR, fault_info, msr_u21);
+                                if (!info.unprivileged_readable) return self.trap(.InvalidMSR, fault_info, msr_u21);
                             }
                             _ = self.storeChecked(encoded.reg, self.msrs.get(msr));
                         },
                         .@"wmsr" => {
-                            if(self.privileged()) {
-                                if(!info.privileged_writable) return self.trap(.InvalidMSR, fault_info, msr_u21);
+                            if (self.privileged()) {
+                                if (!info.privileged_writable) return self.trap(.InvalidMSR, fault_info, msr_u21);
                             } else {
-                                if(!info.unprivileged_writable) return self.trap(.InvalidMSR, fault_info, msr_u21);
+                                if (!info.unprivileged_writable) return self.trap(.InvalidMSR, fault_info, msr_u21);
                             }
                             self.msrs.set(msr, self.load(encoded.reg));
                         },

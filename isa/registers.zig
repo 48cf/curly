@@ -25,6 +25,7 @@ pub const Register = enum(u5) {
     sp = 29,
     fp = 30,
     zero = 31,
+    _,
 };
 
 pub const Msr = enum(u21) {
@@ -92,10 +93,10 @@ pub const MSRInfo = packed struct {
 
     pub fn encode(value: @This()) u64 {
         var result: u64 = 0;
-        if(value.unprivileged_readable) result |= (1 << 0);
-        if(value.unprivileged_writable) result |= (1 << 1);
-        if(value.privileged_readable) result |= (1 << 2);
-        if(value.privileged_writable) result |= (1 << 3);
+        if (value.unprivileged_readable) result |= (1 << 0);
+        if (value.unprivileged_writable) result |= (1 << 1);
+        if (value.privileged_readable) result |= (1 << 2);
+        if (value.privileged_writable) result |= (1 << 3);
         return result;
     }
 
