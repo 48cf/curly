@@ -46,12 +46,15 @@ fn prettyPrintInstruction(instr: isa.Instruction, addr: u64, writer: anytype) !v
             }
             switch(i.code) {
                 .@"add", .@"sub",
+                => return writer.print("{s} {s}, {s}, 0x{X}", .{@tagName(i.code), @tagName(i.reg1), @tagName(i.reg2), i.imm}),
                 .@"jeq", .@"jne", .@"jlt", .@"jle", .@"jge", .@"jgt",
                 => return writer.print("{s} {s}, {s}, 0x{X}", .{@tagName(i.code), @tagName(i.reg1), @tagName(i.reg2), target_branch}),
                 //else => try writer.print("{}\n", .{i}),
                 .@"ld.b", .@"ld.w", .@"ld.d", .@"ld.q",
-                .@"st.b", .@"st.w", .@"st.d", .@"st.q",
-                => return writer.print("{s} {s}, {d}({s})", .{@tagName(i.code), @tagName(i.reg1), i.imm, @tagName(i.reg2)}),
+                .@"st.b", .@"st.w", .@"st.d", .@"st.q", => {
+                    const sign_ext = @as(i64, @bitCast(i16, i.imm));
+                    return writer.print("{s} {s}, {d}({s})", .{@tagName(i.code), @tagName(i.reg1), sign_ext, @tagName(i.reg2)});
+                },
             }
         },
         .r => |i| switch(i.code) {
