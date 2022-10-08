@@ -15,10 +15,12 @@ trap_handler:
     call putstr
     jmp inf_loop
 
+.include uart.asm
+
 hello_world:
-    .db 72, 101, 108, 108, 111, 44, 32, 119, 111, 114, 108, 100, 33, 10, 0
+    .db "Hello, world!\n", 0
 
 trap_message:
-    .db 84, 114, 97, 112, 112, 101, 100, 33, 10, 0
+    .db "Trapped!\n", 0
 
-.include uart.asm
+jmp start

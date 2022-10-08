@@ -6,6 +6,7 @@ const TokenValue = union(enum) {
     eof,
     ident,
     integer: u64,
+    string: []const u8,
     paren_open,
     paren_close,
     comma,
@@ -182,7 +183,17 @@ const Tokenizer = struct {
             else => {},
         }
 
-        if (std.ascii.isAlpha(ch) or ch == '_' or ch == '.' or ch == '$') {
+        if (ch == '"') {
+            var value = std.ArrayList(u8).init(std.heap.page_allocator);
+
+            while (!self.isEof() and self.source[self.offset] != '"') {
+                value.append(self.parseLiteralChar()) catch unreachable;
+            }
+
+            self.offset += 1;
+
+            return .{ .value = .{ .string = value.toOwnedSlice() }, .start = start, .source_bytes = self.source[start..self.offset] };
+        }  else if (std.ascii.isAlpha(ch) or ch == '_' or ch == '.' or ch == '$') {
             while (!self.isEof()) {
                 const next_ch = self.source[self.offset];
 
@@ -261,6 +272,47 @@ const Tokenizer = struct {
 
     fn readRegister(self: *@This()) isa.Register {
         return self.expect(.register).value.register;
+    }
+
+    fn parseLiteralChar(self: *@This()) u8 {
+        switch (self.source[self.offset]) {
+            '\\' => {
+                switch (self.source[self.offset + 1]) {
+                    'x' => {
+                        const result = std.fmt.parseUnsigned(u8, self.source[self.offset + 2..][0..2], 16) catch unreachable;
+                        self.offset += 4;
+                        return result;
+                    },
+                    't' => {
+                        self.offset += 2;
+                        return '\t';
+                    },
+                    'n' => {
+                        self.offset += 2;
+                        return '\n';
+                    },
+                    'r' => {
+                        self.offset += 2;
+                        return '\r';
+                    },
+                    'e' => {
+                        self.offset += 2;
+                        return '\x1b';
+                    },
+                    else => {
+                        const result = self.source[self.offset + 1];
+                        self.offset += 2;
+                        return result;
+                    }
+                }
+            },
+            0 => @panic("Whoops"),
+            else => {
+                const result = self.source[self.offset];
+                self.offset += 1;
+                return result;
+            },
+        }
     }
 };
 
@@ -547,7 +599,6 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                 .@"ld", .@"ld.b", .@"ld.w", .@"ld.d", .@"ld.q", .@"st", .@"st.b", .@"st.w", .@"st.d", .@"st.q" => {
                     const value_reg = tokenizer.readRegister();
                     _ = tokenizer.expect(.comma);
-                    _ = value_reg;
 
                     const m_opcode: isa.MTypeCode = switch (m) {
                         .@"ld.b" => .@"ld.b",
@@ -713,8 +764,6 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                         },
                         else => @panic("Expected integer or register!"),
                     }
-                    _ = dest;
-                    _ = lhs;
                 },
                 .@"ret" => {
                     try writer.r(
@@ -796,6 +845,10 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                                 .@".dq" => try writer.embedInt(u64, @truncate(u64, imm)),
                                 else => unreachable,
                             },
+                            .string => |value| switch (kw) {
+                                .@".db" => try writer.embedBytes(value),
+                                else => unreachable,
+                            },
                             .ident => {
                                 if (kw != .@".dq") {
                                     @panic("Can't use label reference with .db, .dw or .dd!");
@@ -813,7 +866,7 @@ fn handleSourceFile(path: []const u8, input: []const u8, writer: *Writer) Assemb
                                     });
                                 }
                             },
-                            else => std.debug.panic("Expected integer or ident, got {}", .{operand}),
+                            else => std.debug.panic("Expected integer, string or ident, got {}", .{operand}),
                         }
 
                         if (tokenizer.peek().value != .comma) {

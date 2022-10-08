@@ -23,9 +23,10 @@ const MemoryBus = struct {
     fn load(self: *MemoryBus, comptime T: type, addr: u64) T {
         if (addr >= self.dram_base and addr <= self.dram_base + self.dram.items.len - @sizeOf(T)) {
             return std.mem.readIntLittle(T, self.dram.items[addr - self.dram_base ..][0..@sizeOf(T)]);
+        } else {
+            std.log.warn("Unhandled read of size {} from address 0x{x}", .{@sizeOf(T), addr});
+            return @intCast(T, 0);
         }
-
-        @panic("eeeweajkdasd");
     }
 
     fn store(self: *MemoryBus, comptime T: type, addr: u64, value: T) void {
@@ -33,9 +34,9 @@ const MemoryBus = struct {
             return std.mem.writeIntLittle(T, self.dram.items[addr - self.dram_base ..][0..@sizeOf(T)], value);
         } else if (T == u32 and addr == 0x10000) {
             return std.io.getStdOut().writer().writeByte(@truncate(u8, value)) catch unreachable;
+        } else {
+            std.log.warn("Unhandled write of size {} to address 0x{x}", .{@sizeOf(T), addr});
         }
-
-        std.debug.panic("eeeweajkdasd {s} {X} {X}", .{ @typeName(T), addr, value });
     }
 };
 
